@@ -133,12 +133,10 @@ CREATE TRIGGER memories_fts_insert AFTER INSERT ON memories WHEN new.indexed = 1
 END;
 
 -- Split into two triggers so 0→1 promotion correctly adds to FTS without double-delete.
--- Added `NEW.retired_at IS NULL` guard on the INSERT leg so retire UPDATEs
--- (retired_at NULL → non-NULL) do not re-insert the row. The companion
--- trg_memories_fts_purge_on_retire trigger near the end of this file does
--- the actual DELETE at the retire transition; without this guard, the
--- 'delete' command issued there is silently no-op'd by FTS5 statement-level
--- batching against the pending INSERT.
+-- The `NEW.retired_at IS NULL` guard on the INSERT leg means a retire UPDATE
+-- (retired_at NULL → non-NULL) fires the DELETE leg (removing the row's tokens)
+-- but NOT the INSERT leg (which would re-add them). The retire purge is done by
+-- this split pair itself — there is no separate purge trigger.
 -- Fix (issue #97-3): scope the FTS sync triggers to the columns that actually
 -- affect the index. Previously they fired on ANY UPDATE to a memory row — most
 -- notably the recall-count/confidence/labile bump that `cmd_search` performs
