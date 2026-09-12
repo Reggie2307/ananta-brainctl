@@ -139,12 +139,22 @@ END;
 -- the actual DELETE at the retire transition; without this guard, the
 -- 'delete' command issued there is silently no-op'd by FTS5 statement-level
 -- batching against the pending INSERT.
-CREATE TRIGGER memories_fts_update_delete AFTER UPDATE ON memories WHEN old.indexed = 1 BEGIN
+-- Fix (issue #97-3): scope the FTS sync triggers to the columns that actually
+-- affect the index. Previously they fired on ANY UPDATE to a memory row — most
+-- notably the recall-count/confidence/labile bump that `cmd_search` performs
+-- after every search — which ran `_update_delete` (removing the row's tokens)
+-- followed by `_update_insert`. On external-content FTS5 the re-insert does not
+-- reliably rebuild the inverted index, so the first search silently corrupted
+-- the index and every subsequent search returned zero hits. Restricting the
+-- triggers to the indexed columns + the two gate flags (`indexed`, `retired_at`)
+-- keeps recall-count updates from touching the index while preserving the
+-- 0→1 promotion and retire→purge transitions.
+CREATE TRIGGER memories_fts_update_delete AFTER UPDATE OF content, category, tags, indexed, retired_at ON memories WHEN old.indexed = 1 BEGIN
     INSERT INTO memories_fts(memories_fts, rowid, content, category, tags)
     VALUES ('delete', old.id, old.content, old.category, old.tags);
 END;
 
-CREATE TRIGGER memories_fts_update_insert AFTER UPDATE ON memories WHEN new.indexed = 1 AND new.retired_at IS NULL BEGIN
+CREATE TRIGGER memories_fts_update_insert AFTER UPDATE OF content, category, tags, indexed, retired_at ON memories WHEN new.indexed = 1 AND new.retired_at IS NULL BEGIN
     INSERT INTO memories_fts(rowid, content, category, tags)
     VALUES (new.id, new.content, new.category, new.tags);
 END;
